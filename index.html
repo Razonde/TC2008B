@@ -25,7 +25,7 @@
 
         "use strict";
 
-        let renderer, scene, camera, orbitControls, model, stats, gui;
+        let renderer, scene, camera, model, orbitControls, stats, data, dataReady = false, gui, k = 0;
         
         function init(event) {
             // RENDERER ENGINE
@@ -41,24 +41,15 @@
 
             // MODELS
             const scenary = new Scenary();
-            model = new CalseCar(0,200);
+            //model = new ClaseCar(0,5,200);
 
             // SCENE GRAPH
             scene.add(scenary);
-            scene.add(model);
+            //scene.add(model);
 
             // CAMERA (PERSPECTIVE)
-            const fov = 60;    // Field ov view
-            const aspect = window.innerWidth / window.innerHeight;
-            const near = 0.01;
-            const far = 10000.0;
-            camera = new THREE.PerspectiveCamera(fov, aspect, near, far);
-            camera.position.set(-100, 100, 300);
-            // CAMERA CONTROLS
-            orbitControls = new OrbitControls(camera, renderer.domElement);
-            //orbitControls.target = model.position;
-            orbitControls.update();
-
+            camera = new Camera();
+            
             // SETUP STATS
             stats = new Stats();
             stats.showPanel(0); // 0: fps, 1: ms, 2: mb, 3+: custom
@@ -80,10 +71,22 @@
             guiSceneMenu.open();
 
             // MODEL-MENU
-            const guiModelMenu = gui.addFolder("Model Menu");
-
+            //const guiModelMenu = gui.addFolder("Model Menu");
+            const guiCameraMenu = gui.addFolder("Camera Menu");
             // GUI MENU
-            gui.add(model, "animate").setValue(model.rotate).name("Animate").listen().onChange(function(value) {});
+            //gui.add(model, "animate").setValue(model.animate).name("Animate").listen().onChange(function(value) {});
+            guiCameraMenu.add(camera, "cameraValue").min(1).max(5).step(1).setValue(camera.cameraValue).name("Camera").listen().onChange(function(value){
+                camera.setCamera(value);
+            })
+            guiCameraMenu.add(camera.orbitControls, "autoRotate").setValue(camera.orbitControls.autoRotate).name("Rotate").listen().onChange(function(value){
+                camera.setAutoRotate(value);
+            })
+
+
+            readTextFile("simul_data.json", function(Text){
+                data = JSON.parse(Text);
+                dataReady = true;
+            });
 
             // DRAW SCENE IN A RENDER LOOP (ANIMATION)
             renderLoop();
@@ -98,9 +101,45 @@
         }
 
         function updateScene() {
+            if(camera.orbitControls.autoRotate){
+                camera.orbitControls.update();
+            }
            if(model && model.animate) {
-               model.position.z = model.position.z - 0.1;
+                model.position.z = model.position.z - 0.2;
+                if(camera.cameraValue == 5){
+                    camera.setInModelView(model);
+                }
            }
+           if(dataReady && k < data.frames.length){
+               for(let i = 0; i < data.frames[k].cars.length; i++){
+                    const id = data.frames[k].cars[i].id;
+                    const x = data.frames[k].cars[i].x;
+                    const z = data.frames[k].cars[i].z;
+                    const dir = data.frames[k].cars[i].dir;
+                    let car = scene.getObjectByName(id);
+                    if(!car){
+                        let car = new ClaseCar(id, x,z);
+                        car.name = id;
+                        scene.add(car);
+                    }else{
+                        car.setPosition(x,z);
+                        car.setDirection(dir);
+                    }
+               }
+               k++;
+           }
+        }
+
+        function readTextFile(file, callback) {
+            var rawFile = new XMLHttpRequest();
+            rawFile.overrideMimeType("application/json");
+            rawFile.open("GET", file, true);
+            rawFile.onreadystatechange = function() {
+                if (rawFile.readyState === 4 && rawFile.status == "200") {
+                    callback(rawFile.responseText);
+                }
+            }
+            rawFile.send(null);
         }
 
         // EVENT LISTENERS & HANDLERS
@@ -112,6 +151,43 @@
             renderer.setSize(window.innerWidth, window.innerHeight);            
         }, false);
 
+        class Camera extends THREE.PerspectiveCamera {
+            constructor(fov = 60, aspect = window.innerWidth / window.innerHeight, near = 0.01, far = 10000.0){
+                super(fov, aspect, near, far);
+                this.cameraValue = 1;
+                this.orbitControls = new OrbitControls(this, renderer.domElement);
+                this.orbitControls.update();
+                this.setPerspectiveView();
+            }
+            setPerspectiveView(x = -100, y = 100, z = 300, upX = 0, upY = 1, upZ = 0){
+                this.position.set(x, y, z);
+                this.orbitControls.target = new THREE.Vector3(0,0,0);
+                this.up.set(upX,upY,upZ);
+                this.orbitControls.update();
+            }
+            setInModelView(object3d){
+                this.position.set(model.position.x - 0.5,model.position.y + 1.7,model.position.z);
+                this.orbitControls.target = new THREE.Vector3(0,0,0);
+                this.up.set(0,1,0);
+                this.orbitControls.update();
+            }
+            setCamera(value) {
+                if(value == 1){
+                    this.setPerspectiveView(); //Vista de perspectiva
+                }else if(value == 2){
+                    this.setPerspectiveView(0, 400, 0, 0, 0, 1); //Vista superior
+                }else if(value == 3){
+                    this.setPerspectiveView(0, 10, 300, 0, 1, 0); //Vista frontal
+                }else if(value == 4){
+                    this.setPerspectiveView(300, 10, 0, 0, 1, 0); //Vista lateral
+                }else if(value == 5){
+                    this.setInModelView(model);
+                }
+            }
+            setAutoRotate(value = true){
+                this.orbitControls.autoRotate = value;
+            }
+        }
 
         class Axes extends THREE.AxesHelper {
             constructor(size = 10, visible = true) {
@@ -221,50 +297,15 @@
                 }
             }
         }
-
-        class GasStation extends ScenaryComponent {
-            constructor(x = 0, z = 0, vertical = true, color = 0x808080, scaleFactor = 2, y = 0, objFileName = "./assets/obj/GasStation.obj") {
-                super(color, scaleFactor, objFileName, vertical, x, z, y);
-            }
-        }
-
-        class House extends ScenaryComponent {
-            constructor(x = 0, z = 0, vertical = true, color = 0x808080, scaleFactor = 0.3, y = 0, objFileName = "./assets/obj/house.obj") {
-                super(color, scaleFactor, objFileName, vertical, x, z, y);
-                this.rotation.x = Math.PI/2;
-            }
-        }
-
-        class Gate extends ScenaryComponent {
-            constructor(x = 0, z = 0, vertical = true, color = 0x808080, scaleFactor = 0.15, y = 0, objFileName = "./assets/obj/fence.obj") {
-                super(color, scaleFactor, objFileName, vertical, x, z, y);
-            }
-
-            setRotation(rotate = true) {
-                if (rotate) {
-                    this.rotation.y = 2*Math.PI;
-                } else {
-                    this.rotation.y =Math.PI/2;
-                }
-            }
-        }
-
-        class Tree extends ScenaryComponent {
-            constructor(x = 0, z = 0, vertical = true, color = 0x32cd32, scaleFactor = 0.7, y = 0, objFileName = "./assets/obj/tree.obj") {
-                super(color, scaleFactor, objFileName, vertical, x, z, y);
-            }
-            setRotation(rotate = true) {
-                if (rotate) {
-                    this.rotation.y = Math.PI;
-                } else {
-                    this.rotation.y = Math.PI/2;
-                }
-            }
-        }
-
-
-        /* 
+        
         // SEMAFORO
+
+        class TrafficLight extends THREE.Mesh{
+            constructor(height = 5){
+                super();
+            }
+        }
+
         class BaseTrafficLight extends THREE.Mesh {
             constructor(height = 5) {
                 const geometry = new THREE.CylinderGeometry( 0.15, 0.15, height, 32 ); // radius top, radius bottom, height, segments
@@ -337,7 +378,7 @@
                 const bBox = this.medium.solid.geometry.boundingBox;
                 this.position.y = -bBox.min.y;
             }
-        }*/
+        }
 
         class Cube extends THREE.Group {
             constructor(x = 0, z = 0, front = 50, depth = 50, height = 10, color = 0xcc0000, wireColor = 0xffffff) {
@@ -396,12 +437,11 @@
 
                  //SW - TEC - SORIANA
                  this.cubes.push(new Cube(-38, 33, 50, 40, 0.3, 0x5AA897)); // Gasolinera-seven
-                 this.add(new GasStation(-45, 45, true, 0x5AA897));
 
                  this.cubes.push(new Cube(-38, 65, 50, 20, 7));// Tires
 
                  this.cubes.push(new Cube(-38, 102, 50, 50, 0.3, 0xB983FF));// Peak a bo
-                 this.add(new House(-38,110, true, 0xB983FF));
+                 //this.add(new House(-38,110, true, 0xB983FF));
 
                  this.cubes.push(new Cube(-38, 214, 50, 170, 15, 0x325288));// Tec
 
@@ -410,15 +450,6 @@
 
                 //NW - RECINTO
                 this.cubes.push(new Cube(-113, -161, 200, 296, .3, 0x9FE6A0));// recinto
-                this.trees.push(new Tree(-33, -25));
-                this.trees.push(new Tree(-90, -25));
-                this.trees.push(new Tree(-147, -25));
-                this.trees.push(new Tree(-25, -55, false));
-                this.trees.push(new Tree(-25, -100, false));
-                this.trees.push(new Tree(-25, -150, false));
-                this.trees.push(new Tree(-25, -200, false));
-                this.trees.push(new Tree(-25, -250, false));
-                //this.add(new Tree(38, 12));// recinto
 
                 //SE - ESQUINA SQUARE MARKET
                 this.cubes.push(new Cube(38, 73, 55, 120, 25,0xFF414D)); // Square
@@ -426,54 +457,31 @@
                 this.cubes.push(new Cube(38, 209.5, 55, 45, 15, 0xEDC988)); // Edificio en construccion 2
 
                 this.cubes.push(new Cube(38, 256.5, 55, 45, 0.3, 0x214252)); // Cochera
-                this.add(new Gate(25, 250, false));
-                this.add(new Gate(25, 265, false)); 
 
                 this.cubes.push(new Cube(87.5, 48, 35, 70, 0.3, 0x693C72)); // Guarderia
-                this.add(new House(87.5,20, true, 0x693C72));
 
                 this.cubes.push(new Cube(119.5, 48, 25, 70, 0.3, 0xDE8971)); // Edificio en construccion 3
-                this.add(new Gate(119, 20));
 
                 this.cubes.push(new Cube(154, 48, 40, 70, 15, 0xD1CEBD)); // Plaza
 
                 this.cubes.push(new Cube(186, 48, 20, 70, 0.3, 0xA0937D)); // Altamira
-                this.add(new Gate(186, 20));
                 
                 // NE - WALMART
                 this.cubes.push(new Cube(33, -38, 40, 50, 0.3, 0x808080)); // Gasolinera
-                this.add(new GasStation(40, -45, false, 0x808080, 2));
 
                 this.cubes.push(new Cube(105, -125, 184, 120, 20, 0xA7D0CD)); // Walmart
 
                 this.cubes.push(new Cube(48, -247, 70, 120, 0.3, 0x4AA96C)); // Valle real
-                this.trees.push(new Tree(20, -260, false));
-                this.trees.push(new Tree(20, -210, false));
 
                 this.cubes.push(new Cube(75, -38, 40, 50, 7, 0xFFC93C)); // Restaurant
 
                 this.cubes.push(new Cube(147, -39, 100, 52, 20, 0xA7D0CD)); // Walmart aviacion
-
-                // this.add(new Lane(113, 0, 200, 1));
-                // this.add(new Lane(-113, 0, 200, 1));
-
-                // let lane = new Lane(0, 163, 300, 1);
-                // lane.rotation.y = Math.PI/2;
-                // this.add(lane);
-
-                // lane = new Lane(0, -163, 300, 1);
-                // lane.rotation.y = Math.PI/2;
-                // this.add(lane);
 
                 // CHILDREN
                 this.add(this.axes);
                 this.add(this.floor);
                 for(let i = 0; i < this.cubes.length; i++) {
                     this.add(this.cubes[i]);
-                }
-
-                for(let i = 0; i < this.trees.length; i++) {
-                    this.add(this.trees[i]);
                 }
             }
         }
@@ -596,9 +604,10 @@
 
         // CLASE AUTO, AGRUPA COMPONENTES 
         // Uso de THREE.Group
-        class CalseCar extends THREE.Group {
-            constructor(x = 0, z = 0) {
+        class ClaseCar extends THREE.Group {
+            constructor(id = 0, x = 0, z = 0) {
                 super();
+                this.idC = id;
                 this.x = x;
                 this.z = z;
                 this.material = false;
@@ -700,6 +709,13 @@
             updateRotation(value) {
                 this.rotate = value;
                 renderLoop();
+            }
+            setPosition(x, z){
+                this.position.set(x, this.position.y, z);
+            }
+            setDirection(dir) {
+                this.theta = dir;
+                this.rotation.y = dir * Math.PI / 180 - Math.PI/2;
             }
         }
     </script>
