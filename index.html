@@ -26,7 +26,7 @@
         "use strict";
 
         let renderer, scene, camera, model, orbitControls, stats, data, dataReady = false, gui, k = 0;
-        
+        window.wireframe = false, window.carColors = 0x00008b;
         function init(event) {
             // RENDERER ENGINE
             renderer = new THREE.WebGLRenderer({antialias: true});
@@ -58,6 +58,7 @@
             // GUI
             gui = new dat.GUI();
 
+            
             // SCENE-MENU
             const guiSceneMenu = gui.addFolder("Scene Menu");
             guiSceneMenu.add(scenary.axes, "visible").setValue(scenary.axes.visible).name("World Axes").listen().onChange(function(value) {
@@ -76,14 +77,24 @@
             // GUI MENU
             //gui.add(model, "animate").setValue(model.animate).name("Animate").listen().onChange(function(value) {});
             guiCameraMenu.add(camera, "cameraValue").min(1).max(5).step(1).setValue(camera.cameraValue).name("Camera").listen().onChange(function(value){
-                camera.setCamera(value);
-            })
+                if(model){
+                    camera.setCamera(value);
+                }
+                
+            });
             guiCameraMenu.add(camera.orbitControls, "autoRotate").setValue(camera.orbitControls.autoRotate).name("Rotate").listen().onChange(function(value){
                 camera.setAutoRotate(value);
-            })
+            });
 
+            const guiModelsMenu = gui.addFolder("Model Menu");
+            guiModelsMenu.add(window, "wireframe").setValue(window.wireframe).name("Wireframes").listen().onChange(function(value){
+                
+            });
+            guiModelsMenu.addColor(window, 'carColors').setValue(window.carColors).name('Colors Bottom').listen().onChange(function(value) {
+                
+            });
 
-            readTextFile("simul_data.json", function(Text){
+            readTextFile("data.json", function(Text){
                 data = JSON.parse(Text);
                 dataReady = true;
             });
@@ -104,30 +115,52 @@
             if(camera.orbitControls.autoRotate){
                 camera.orbitControls.update();
             }
-           if(model && model.animate) {
-                model.position.z = model.position.z - 0.2;
-                if(camera.cameraValue == 5){
-                    camera.setInModelView(model);
-                }
-           }
+            if(camera.cameraValue == 5){
+                camera.setInModelView(model);
+            }
            if(dataReady && k < data.frames.length){
-               for(let i = 0; i < data.frames[k].cars.length; i++){
-                    const id = data.frames[k].cars[i].id;
-                    const x = data.frames[k].cars[i].x;
-                    const z = data.frames[k].cars[i].z;
-                    const dir = data.frames[k].cars[i].dir;
+               for(let i = 0; i < data.frames[k].car.length; i++){
+                    const id = data.frames[k].car[i].id;
+                    const x = data.frames[k].car[i].x;
+                    const z = data.frames[k].car[i].z;
+                    const dir = data.frames[k].car[i].dir;
                     let car = scene.getObjectByName(id);
                     if(!car){
                         let car = new ClaseCar(id, x,z);
                         car.name = id;
                         scene.add(car);
+                        if(!model){
+                            model = car;
+                        }
                     }else{
                         car.setPosition(x,z);
                         car.setDirection(dir);
+                        car.setWireframe(window.wireframe);
+                        car.setCarBottomColor(window.carColors);
                     }
+                    
                }
-               k++;
+               
+               for(let j = 0; j < data.frames[k].trafficLight.length; j++){
+                    const id = data.frames[k].trafficLight[j].id;
+                    const x = data.frames[k].trafficLight[j].x;
+                    const z = data.frames[k].trafficLight[j].z;
+                    const dir = data.frames[k].trafficLight[j].dir;
+                    const state = data.frames[k].trafficLight[j].state;
+                    let trafficLight = scene.getObjectByName(id);
+                    if(!trafficLight){
+                        let trafficLight = new TrafficLight(id, x,z, state);
+                        trafficLight.name = id;
+                        scene.add(trafficLight);
+                        trafficLight.setOnFloor();
+                    }else{
+                        trafficLight.setState(state);
+                    }
+                    
+                }
+                k++;
            }
+           
         }
 
         function readTextFile(file, callback) {
@@ -155,7 +188,9 @@
             constructor(fov = 60, aspect = window.innerWidth / window.innerHeight, near = 0.01, far = 10000.0){
                 super(fov, aspect, near, far);
                 this.cameraValue = 1;
+                // CAMERA CONTROLS
                 this.orbitControls = new OrbitControls(this, renderer.domElement);
+                //orbitControls.target = model.position;
                 this.orbitControls.update();
                 this.setPerspectiveView();
             }
@@ -167,7 +202,7 @@
             }
             setInModelView(object3d){
                 this.position.set(model.position.x - 0.5,model.position.y + 1.7,model.position.z);
-                this.orbitControls.target = new THREE.Vector3(0,0,0);
+                this.orbitControls.target = new THREE.Vector3(model.position.x - 0.5,model.position.y + 1.7,model.position.z+0.1);
                 this.up.set(0,1,0);
                 this.orbitControls.update();
             }
@@ -301,45 +336,48 @@
         // SEMAFORO
 
         class TrafficLight extends THREE.Mesh{
-            constructor(height = 5){
-                super();
-            }
-        }
-
-        class BaseTrafficLight extends THREE.Mesh {
-            constructor(height = 5) {
-                const geometry = new THREE.CylinderGeometry( 0.15, 0.15, height, 32 ); // radius top, radius bottom, height, segments
-                const material = new THREE.MeshBasicMaterial( {color: 0x94B3FD} );
-                const cylinder = new THREE.Mesh( geometry, material );
+            constructor(id = 0, x = 0, z = 0, state, radius = 1, color = 0x00FF00){
+                const geometry = new THREE.SphereGeometry(radius, 32, 16);
+                const material = new THREE.MeshBasicMaterial({color: color});
                 super(geometry, material);
-                this.color = 0x94B3FD;
-                this.setOnFloor();
+                this.state = state;
+                this.position.x = x;
+                this.position.z = z;
+                this.idT = id;
+                this.radius = radius;
+                this.color = color;
+                this.doubleSide = false;
             }
-        
-            getColor() {
-                return this.color;
-            }
-
             setColor(hexColor) {
+                this.color = hexColor;
                 this.material.color.setHex(hexColor);
             }
-
             setOnFloor() {
                 this.geometry.computeBoundingBox();
                 const bBox = this.geometry.boundingBox;
                 this.position.y = -bBox.min.y;
             }
+            setState(value){
+                if(value == 2){
+                    this.setColor(0xFF0000);
+                }else if(value == 1){
+                    this.setColor(0xFFFF00);
+                }else if(value == 0){
+                    this.setColor(0x00FF00);
+                }
+            }
         }
 
         class Sphere extends THREE.Group {
-            constructor(x = 0, y = 0, z = 0, radius = 0.2, color = 0xcc0000, wireColor = 0xffffff) {
+            constructor(id = 0, x = 0, z = 0, radius = 0.2, color = 0xcc0000, wireColor = 0xffffff) {
                 super();
+                this.idT = id;
                 this.radius = radius;
                 this.color = color;
                 this.wireColor = color; //wireColor;
                 this.doubleSide = false;
                 this.rotate = false;
-                this.position.set(x, y, z);
+                this.position.set(x, 0, z);
                 // Geometría
                 const geometry = new THREE.SphereGeometry(radius, 32, 16);
 
@@ -349,10 +387,8 @@
 
                 // Low resolution
                 this.solid = new THREE.Mesh(geometry, material);
-                this.wire = new THREE.Mesh(geometry, materialWire);
 
                 this.add(this.solid);
-                this.add(this.wire);
             }
             setWireframe(value = true) {
                 this.solid.setVisible(value);
@@ -449,7 +485,7 @@
 
 
                 //NW - RECINTO
-                this.cubes.push(new Cube(-113, -161, 200, 296, .3, 0x9FE6A0));// recinto
+                this.cubes.push(new TextureCube(-113, -161, 200, 296, .3, 0x9FE6A0));// recinto
 
                 //SE - ESQUINA SQUARE MARKET
                 this.cubes.push(new Cube(38, 73, 55, 120, 25,0xFF414D)); // Square
@@ -611,9 +647,8 @@
                 this.x = x;
                 this.z = z;
                 this.material = false;
-                this.scaleFactor = 5;
+                this.scaleFactor = 2;
                 this.rotate = true;
-
                 // Llantas traseras
                 this.rearTires = new Tire();
                 this.rearTires.position.y = 0.1;
@@ -714,8 +749,58 @@
                 this.position.set(x, this.position.y, z);
             }
             setDirection(dir) {
-                this.theta = dir;
-                this.rotation.y = dir * Math.PI / 180 - Math.PI/2;
+                this.theta = -dir*Math.PI/2;
+                this.rotation.y = -dir * Math.PI/2;
+            }
+        }
+        class TextureCube extends THREE.Group {
+            constructor(x = 0, z = 0, front = 50, depth = 50, height = 10, color = 0xcc0000, wireColor = 0xffffff) {
+                super();
+                this.front = front;
+                this.length = length;
+                this.height = height;
+                this.position.set(x, 0, z);
+                this.color = color;
+                this.wireColor = wireColor;
+                this.doubleSide = false;
+                this.rotate = false;
+                const texture = new THREE.TextureLoader().load("./assets/green-grass.jpg");
+                texture.wrapS = THREE.RepeatWrapping;
+                texture.wrapT = THREE.RepeatWrapping;
+                texture.repeat.set(1,1);
+                const geometry = new THREE.BoxGeometry(front, height, depth);
+                const material = new THREE.MeshBasicMaterial({map: texture});
+                const materialWire = new THREE.MeshBasicMaterial({wireframe: true, color: wireColor});
+                this.solid = new THREE.Mesh(geometry, material);
+                this.wire = new THREE.Mesh(geometry, materialWire);
+                this.setOnFloor();
+                // CHILDREN
+                this.add(this.solid);
+                this.add(this.wire);
+            }
+            setWireframe(value = true) {
+                this.solid.setVisible(value);
+            }
+            setColor(hexColor) {
+                this.color = hexColor;
+                this.solid.material.color.setHex(hexColor);
+            }
+            setWireColor(hexColor) {
+                this.wireColor = hexColor;
+                this.wire.material.color.setHex(hexColor);
+            }
+            setDoubleSide(value) {
+                this.doubleSide = value;
+                if(value) {
+                    this.solid.material.side = THREE.DoubleSide;
+                } else {
+                    this.solid.material.side = THREE.FrontSide;
+                }
+            }
+            setOnFloor() {
+                this.solid.geometry.computeBoundingBox();
+                const bBox = this.solid.geometry.boundingBox;
+                this.position.y = -bBox.min.y;
             }
         }
     </script>
